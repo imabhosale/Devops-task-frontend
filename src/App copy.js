@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import axios from 'axios';
 
-const APIT_URL = 'http://localhost:8080/file';
+const APIT_URL = 'http://13.233.124.207/:8082/file';
 
 const App = () => {
   const [files, setFiles] = useState(undefined);
