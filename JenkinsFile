@@ -1,0 +1,77 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_ACCOUNT_ID = "211125753995"  // Replace with your AWS account ID
+        AWS_DEFAULT_REGION = "ap-south-1"  // Replace with your AWS region
+        FRONTEND_REPO_NAME = "frontend-repo"  // Replace with your ECR repository name for frontend
+        FRONTEND_IMAGE_TAG = "frontend-latest"  // Tag for your frontend image
+        REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${FRONTEND_REPO_NAME}"
+        FRONTEND_IP = "13.233.124.207"  // Updated IP of your EC2 instance
+    }
+
+    stages {
+        // Logging into AWS ECR
+        stage('Logging into AWS ECR') {
+            steps {
+                script {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials-id']]) {
+                        // Use AWS credentials to log in to ECR
+                        sh """
+                            aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | \
+                            docker login --username AWS --password-stdin ${REPOSITORY_URI}
+                        """
+                    }
+                }
+            }
+        }
+
+        // Cloning the Git repository for frontend
+        stage('Cloning Frontend Git') {
+            steps {
+                checkout([$class: 'GitSCM', 
+                          branches: [[name: '*/main']], 
+                          userRemoteConfigs: [[url: 'https://github.com/imabhosale/Devops-task-frontend.git']]])
+            }
+        }
+
+        // Building Frontend Docker image
+        stage('Building Frontend image') {
+            steps {
+                script {
+                    frontendImage = docker.build("${FRONTEND_REPO_NAME}:${FRONTEND_IMAGE_TAG}")
+                }
+            }
+        }
+
+        // Pushing Frontend image to ECR
+        stage('Pushing Frontend to ECR') {
+            steps {
+                script {
+                    sh "docker tag ${FRONTEND_REPO_NAME}:${FRONTEND_IMAGE_TAG} ${REPOSITORY_URI}:${FRONTEND_IMAGE_TAG}"
+                    sh "docker push ${REPOSITORY_URI}:${FRONTEND_IMAGE_TAG}"
+                }
+            }
+        }
+
+        // Deploying Frontend to EC2 instance inside a Docker container
+        stage('Deploying Frontend') {
+    steps {
+        script {
+            // Use the stored SSH private key from Jenkins credentials
+            withCredentials([sshUserPrivateKey(credentialsId: 'jenkins-ec2-key', keyFileVariable: 'SSH_KEY')]) {
+                // SSH into the EC2 instance
+                sh """
+                    ssh -o StrictHostKeyChecking=no -i \$SSH_KEY ubuntu@${FRONTEND_IP} '
+                        aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 211125753995.dkr.ecr.ap-south-1.amazonaws.com &&
+                        docker pull ${REPOSITORY_URI}:${FRONTEND_IMAGE_TAG} &&
+                        docker run -d -p 80:3000 --name frontend-container ${REPOSITORY_URI}:${FRONTEND_IMAGE_TAG}
+                    '
+                """
+            }
+        }
+    }
+}
+
+    }
+}
